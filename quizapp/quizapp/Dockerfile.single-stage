@@ -1,0 +1,33 @@
+# Build stage
+FROM maven:3.8.6-eclipse-temurin-17 AS builder
+WORKDIR /app
+
+# Копіюємо тільки pom.xml спочатку для кешування залежностей
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+
+# Копіюємо вихідний код
+COPY src ./src
+
+# Тимчасово змінюємо версію Java у pom.xml
+RUN sed -i 's/<java.version>21<\/java.version>/<java.version>17<\/java.version>/' pom.xml && \
+    mvn clean package -DskipTests && \
+    ls -la /app/target/
+
+# Runtime stage (Alpine-based)
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+
+# Копіюємо JAR файл (з урахуванням стандартного імені Spring Boot)
+COPY --from=builder /app/target/quizapp-*.jar app.jar
+
+# Налаштування для Alpine
+RUN apk add --no-cache tzdata && \
+    ln -sf /usr/share/zoneinfo/Europe/Kiev /etc/localtime && \
+    addgroup -S spring && \
+    adduser -S -G spring spring && \
+    chown spring:spring app.jar
+
+USER spring
+EXPOSE 8080
+ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]
